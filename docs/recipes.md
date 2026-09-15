@@ -130,6 +130,50 @@ DebugRing.log({"pos": position, "vel": velocity})
 
 拉取（游戏运行中）：`gdflow dump`。零磁盘写入，不会伤硬盘。
 
+## 配方 7：动画 —— 手写 tscn 内嵌（正解）
+
+**陷阱先讲**：`Animation` 单资源手写 .tres 可以（load 后轨道/关键帧完整）；但 **AnimationLibrary 存 tres 不可靠**——Godot 的 ResourceSaver 保存 AnimationLibrary 时动画数据不落盘（实测 `_data` 为空），手写 `_data = {&"name": ...}` 格式 load 后 `has_animation()` 也是 false。
+**正解：把 Animation 和 AnimationLibrary 作为 sub_resource 直接写进场景 tscn**（实测 load+play 全通）：
+
+```ini
+[gd_scene load_steps=3 format=3]
+
+[sub_resource type="Animation" id="Animation_st"]
+resource_name = "st_anim"
+length = 1.0
+loop_mode = 1
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath(".")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0, 0.5, 1),
+"transitions": PackedFloat32Array(1, 1, 1),
+"update": 0,
+"values": [Vector2(0, 0), Vector2(50, 25), Vector2(0, 0)]
+}
+
+[sub_resource type="AnimationLibrary" id="AnimationLibrary_st"]
+_data = {
+&"st_anim": SubResource("Animation_st")
+}
+
+[node name="Root" type="Node2D"]
+
+[node name="Anim" type="AnimationPlayer" parent="."]
+libraries = {
+&"": SubResource("AnimationLibrary_st")
+}
+autoplay = "st_anim"
+```
+
+要点：`libraries` 的默认库键是 `&""`（空 StringName）；值轨道 `values` 里直接写 Variant（Vector2 等）。
+验证一行脚本：load 场景 → instantiate → `ap.play("st_anim")` → 断言 `is_playing()`。
+运行时查询/播放已挂动画可用插件工具：`list_runtime_animations` / `play_runtime_animation` / `get_runtime_animation_state`。
+**没有**轨道编辑类 MCP 工具——程序化生成轨道走代码（`Animation.new()` + `track_insert_key`）。
+
 ## 通用原则
 
 1. **先 gdflow 后 gdmcp**：run/stop/check/validate/setprop/dump/import 全走 gdflow

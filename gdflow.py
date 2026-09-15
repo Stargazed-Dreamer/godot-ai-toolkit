@@ -693,6 +693,26 @@ tile_size = Vector2i(16, 16)
 sources/0 = SubResource("TileSetAtlasSource_st")
 '''
 
+_ANIM_TRES = '''[gd_resource type="Animation" format=3]
+
+[resource]
+resource_name = "st_anim"
+length = 1.0
+loop_mode = 1
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath(".")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0, 0.5, 1),
+"transitions": PackedFloat32Array(1, 1, 1),
+"update": 0,
+"values": [Vector2(0, 0), Vector2(50, 25), Vector2(0, 0)]
+}
+'''
+
 _CHECK_SCRIPT = '''extends SceneTree
 func _init():
 	var ok := true
@@ -707,6 +727,15 @@ func _init():
 		tiles = src.get_tiles_count() if src else 0
 	print("ST ts_valid=", ts != null, " tiles=", tiles)
 	ok = ok and ts != null and tiles == 2
+	var an = load("res://tests/_st_anim.tres")
+	var anim_tracks := 0
+	var anim_keys := 0
+	if an:
+		anim_tracks = an.get_track_count()
+		anim_keys = an.track_get_key_count(0) if anim_tracks > 0 else 0
+	print("ST anim_valid=", an != null, " tracks=", anim_tracks, " keys=", anim_keys,
+		" len=", an.length if an else 0.0, " loop=", an.loop_mode if an else 0)
+	ok = ok and an != null and anim_tracks == 1 and anim_keys == 3
 	print("ST result=", "PASS" if ok else "FAIL")
 	quit()
 '''
@@ -740,7 +769,8 @@ def cmd_selftest(project, with_runtime=True):
 
     tests_dir = os.path.join(project, "tests")
     os.makedirs(tests_dir, exist_ok=True)
-    for name, body in (("_st_tex.tres", _TEX_TRES), ("_st_sf.tres", _SF_TRES), ("_st_ts.tres", _TS_TRES)):
+    for name, body in (("_st_tex.tres", _TEX_TRES), ("_st_sf.tres", _SF_TRES),
+                       ("_st_ts.tres", _TS_TRES), ("_st_anim.tres", _ANIM_TRES)):
         with open(os.path.join(tests_dir, name), "w", encoding="utf-8", newline="\n") as f:
             f.write(body)
 
@@ -775,12 +805,17 @@ def cmd_selftest(project, with_runtime=True):
     record("T4 SpriteFrames tres 读写", "frames=2" in sf_line and "sf_valid=true" in sf_line, sf_line)
     record("T5 TileSet tres 读写", "tiles=2" in ts_line and "ts_valid=true" in ts_line, ts_line)
 
-    # T6 场景保存 + 主循环
-    d = g.json(["scenes", "save"])
-    record("T6 场景保存", d.get("ok") is True, json.dumps(d)[:150])
-    record("T7 主循环 check", g.check())
+    # T6 Animation tres（值轨道+关键帧）
+    an_line = next((l for l in lines if "anim_valid" in l), "")
+    record("T6 Animation tres 读写（轨道/关键帧）",
+           "anim_valid=true" in an_line and "tracks=1" in an_line and "keys=3" in an_line, an_line)
 
-    # T8 运行时链路（run → dump → stop）
+    # T7 场景保存 + 主循环
+    d = g.json(["scenes", "save"])
+    record("T7 场景保存", d.get("ok") is True, json.dumps(d)[:150])
+    record("T8 主循环 check", g.check())
+
+    # T9 运行时链路（run → dump → stop）
     if with_runtime:
         try:
             ok_run = g.run(wait_probe=True, probe_timeout=40.0)
@@ -789,15 +824,16 @@ def cmd_selftest(project, with_runtime=True):
             if ok_run:
                 res = g.dump("DebugRing")
                 ok_dump = isinstance(res, (list, dict))
-            record("T8 run+dump 运行时链路", ok_run and ok_dump,
+            record("T9 run+dump 运行时链路", ok_run and ok_dump,
                    "" if ok_run and ok_dump else "run 失败或 DebugRing 未安装")
         finally:
             g.stop()
     else:
-        print("  [SKIP] T8 run+dump（--no-run）")
+        print("  [SKIP] T9 run+dump（--no-run）")
 
     # 清理测试产物
-    for f in ("_st_scene.tscn", "_st_tex.tres", "_st_sf.tres", "_st_ts.tres", "_st_check.gd", "_st_icon.png"):
+    for f in ("_st_scene.tscn", "_st_tex.tres", "_st_sf.tres", "_st_ts.tres", "_st_anim.tres",
+              "_st_check.gd", "_st_icon.png"):
         p = os.path.join(tests_dir, f)
         if os.path.exists(p):
             os.remove(p)

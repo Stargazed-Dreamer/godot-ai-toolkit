@@ -23,6 +23,7 @@ AI Agent
 | **资源引用**（texture/tile_set/sprite_frames/stream/script） | **字符串路径直通** `"res://assets/a.png"`，插件自动 load | ✅ 实测全通 |
 | PackedVector2Array 等 | 对象数组 `[{"x":..,"y":..}]` 或扁平数组（本仓库补丁解锁） | ✅ |
 | **资源内部嵌套数据**（SpriteFrames 帧、Animation 轨道、TileSet 切片） | **无 MCP 工具，别试** → 用手写 .tres 或代码构建（见 recipes） | ❌ 边界 |
+| AnimationLibrary 存 tres | **陷阱**：ResourceSaver 保存时动画数据不落盘（_data 为空），手写 _data 格式 load 后 has_animation 也为 false → 动画正解是**手写场景 tscn 内嵌 sub_resource**（recipes 配方 7） | ⚠️ 实测 |
 
 插件已带读回验证补丁：set 后自动比较，不匹配返回 `verify_failed`——看到 success 不代表真的写进去了，**以读回为准**。
 
