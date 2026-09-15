@@ -1,0 +1,65 @@
+diff --git a/lib/gdmcp.mjs b/lib/gdmcp.mjs
+index d6a917a..1ea3908 100644
+--- a/lib/gdmcp.mjs
++++ b/lib/gdmcp.mjs
+@@ -84,3 +84,27 @@ export async function runGame(projectPath, port) {
+ export async function stopGame(projectPath, port) {
+   return runGdmcp(projectPath, ['tool-call', 'stop_project', '--args-json', '{"allow_window":true}', '--apply'], { port, timeoutMs: 60000 });
+ }
++
++// [gdflow] 清理孤儿游戏窗口进程：游戏由编辑器实例经 run_project 拉起，stop_project 只断
++// 调试会话不杀进程，留下仍在运行的窗口。这里杀掉「父进程为该项目编辑器实例」的全部子进程。
++// editorPids: 该项目 running 编辑器实例 PID 集合（来自 instanceManager）。
++export function killOrphanGameProcesses(editorPids) {
++  const pids = [...editorPids];
++  if (!pids.length) return Promise.resolve(0);
++  const list = pids.join(',');
++  const ps =
++    `Get-CimInstance Win32_Process -Filter "Name='godot.windows.opt.tools.64.exe'" | ` +
++    `Where-Object { @(${list}) -contains $_.ParentProcessId -and @(${list}) -notcontains $_.ProcessId } | ` +
++    `ForEach-Object { Stop-Process -Id $_.ProcessId -Force; $_.ProcessId }`;
++  return new Promise((resolve) => {
++    const child = spawn('powershell.exe', ['-NoProfile', '-Command', ps], {
++      windowsHide: true,
++      stdio: ['ignore', 'pipe', 'pipe'],
++    });
++    let out = '';
++    child.stdout.setEncoding('utf8');
++    child.stdout.on('data', (d) => (out += d));
++    child.on('error', () => resolve(0));
++    child.on('close', () => resolve(out.split('\n').filter((l) => l.trim()).length));
++  });
++}
+diff --git a/server.mjs b/server.mjs
+index 8414a4f..b84571d 100644
+--- a/server.mjs
++++ b/server.mjs
+@@ -6,6 +6,7 @@ import * as config from './lib/config.mjs';
+ import * as toolchain from './lib/toolchain.mjs';
+ import * as projects from './lib/projects.mjs';
+ import * as gdmcp from './lib/gdmcp.mjs';
++import { killOrphanGameProcesses } from './lib/gdmcp.mjs';
+ import { instanceManager } from './lib/instances.mjs';
+ import { bus } from './lib/bus.mjs';
+ 
+@@ -200,10 +201,19 @@ async function handleApi(req, res, url) {
+     }
+     if (method === 'POST' && (sub === 'game/run' || sub === 'game/stop')) {
+       try {
++        const editorPids = new Set(
++          instanceManager.runningByProject(project.id).map((i) => i.pid)
++        );
+         const result = sub === 'game/run'
+           ? await gdmcp.runGame(project.path, project.port)
+           : await gdmcp.stopGame(project.path, project.port);
+-        return sendJson(res, 200, { ok: result.ok, data: result.data });
++        // [gdflow] stop_project 只断调试会话不杀进程，这里清理孤儿游戏窗口
++        let cleaned = 0;
++        if (sub === 'game/stop') {
++          cleaned = await killOrphanGameProcesses(editorPids);
++          if (cleaned > 0) console.log(`[game/stop] 已清理 ${cleaned} 个孤儿游戏进程`);
++        }
++        return sendJson(res, 200, { ok: result.ok, data: result.data, orphan_cleaned: cleaned });
+       } catch (e) {
+         return sendJson(res, 200, { ok: false, error: e.message, stdout: e.stdout ?? '' });
+       }
