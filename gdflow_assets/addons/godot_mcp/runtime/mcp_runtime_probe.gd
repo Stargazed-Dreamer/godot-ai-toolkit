@@ -771,18 +771,21 @@ func _handle_set_shader_parameter(data: Array) -> bool:
 	EngineDebugger.send_message("mcp:shader_parameter_updated", [_serialize_shader_parameter_update(resolution, shader_material, parameter_name, old_value)])
 	return true
 
+# [gdflow patch] 以下三个 handler 经 _resolve_tilemap_adapter 同时支持 TileMap 与 TileMapLayer
 func _handle_list_tilemap_layers(data: Array) -> bool:
 	if data.is_empty():
 		EngineDebugger.send_message("mcp:error", [{"message": "list_tilemap_layers requires node_path"}])
 		return true
-	var tilemap: TileMap = _resolve_tilemap(str(data[0]))
-	if not tilemap:
+	var adapter: TileMapAdapterBase = _resolve_tilemap_adapter(str(data[0]))
+	if not adapter:
 		return true
 	var layers: Array = []
-	for layer_index in range(tilemap.get_layers_count()):
-		layers.append(_serialize_tilemap_layer(tilemap, layer_index))
+	for layer_index in range(adapter.layer_count()):
+		layers.append(adapter.layer_summary(layer_index))
+		layers[-1]["node_path"] = adapter.node_path()
+		layers[-1]["layer"] = layer_index
 	EngineDebugger.send_message("mcp:tilemap_layers", [{
-		"node_path": str(tilemap.get_path()),
+		"node_path": adapter.node_path(),
 		"layers": layers,
 		"count": layers.size()
 	}])
@@ -792,28 +795,28 @@ func _handle_get_tilemap_cell(data: Array) -> bool:
 	if data.size() < 3:
 		EngineDebugger.send_message("mcp:error", [{"message": "get_tilemap_cell requires node_path, layer, coords"}])
 		return true
-	var tilemap: TileMap = _resolve_tilemap(str(data[0]))
-	if not tilemap:
+	var adapter: TileMapAdapterBase = _resolve_tilemap_adapter(str(data[0]))
+	if not adapter:
 		return true
 	var layer: int = int(data[1])
-	if not _is_valid_tilemap_layer(tilemap, layer):
+	if not adapter.validate_layer(layer):
 		return true
 	var coords: Vector2i = _variant_to_vector2i(data[2])
 	var use_proxies: bool = false
 	if data.size() >= 4:
 		use_proxies = bool(data[3])
-	EngineDebugger.send_message("mcp:tilemap_cell", [_serialize_tilemap_cell(tilemap, layer, coords, use_proxies)])
+	EngineDebugger.send_message("mcp:tilemap_cell", [adapter.cell_summary(layer, coords, use_proxies)])
 	return true
 
 func _handle_set_tilemap_cell(data: Array) -> bool:
 	if data.size() < 3:
 		EngineDebugger.send_message("mcp:error", [{"message": "set_tilemap_cell requires node_path, layer, coords"}])
 		return true
-	var tilemap: TileMap = _resolve_tilemap(str(data[0]))
-	if not tilemap:
+	var adapter: TileMapAdapterBase = _resolve_tilemap_adapter(str(data[0]))
+	if not adapter:
 		return true
 	var layer: int = int(data[1])
-	if not _is_valid_tilemap_layer(tilemap, layer):
+	if not adapter.validate_layer(layer):
 		return true
 	var coords: Vector2i = _variant_to_vector2i(data[2])
 	var updates: Dictionary = {}
@@ -821,13 +824,13 @@ func _handle_set_tilemap_cell(data: Array) -> bool:
 		updates = data[3]
 	var erase: bool = bool(updates.get("erase", false))
 	if erase:
-		tilemap.erase_cell(layer, coords)
+		adapter.erase_cell(layer, coords)
 	else:
 		var source_id: int = int(updates.get("source_id", -1))
 		var atlas_coords: Vector2i = _variant_to_vector2i(updates.get("atlas_coords", {"x": -1, "y": -1}))
 		var alternative_tile: int = int(updates.get("alternative_tile", 0))
-		tilemap.set_cell(layer, coords, source_id, atlas_coords, alternative_tile)
-	EngineDebugger.send_message("mcp:tilemap_cell_updated", [_serialize_tilemap_cell(tilemap, layer, coords, false)])
+		adapter.set_cell(layer, coords, source_id, atlas_coords, alternative_tile)
+	EngineDebugger.send_message("mcp:tilemap_cell_updated", [adapter.cell_summary(layer, coords, false)])
 	return true
 
 func _handle_list_audio_buses(data: Array) -> bool:
@@ -970,51 +973,18 @@ func _resolve_control_node(node_path: String) -> Control:
 		return null
 	return node
 
-func _resolve_tilemap(node_path: String) -> TileMap:
+# [gdflow patch] TileMap/TileMapLayer 统一适配器（TileMapLayer 为 4.3+ 推荐节点，单层）
+func _resolve_tilemap_adapter(node_path: String) -> TileMapAdapterBase:
 	var node: Node = _resolve_target_node(node_path)
 	if not node:
 		EngineDebugger.send_message("mcp:error", [{"message": "Node not found: " + node_path}])
 		return null
-	if not (node is TileMap):
-		EngineDebugger.send_message("mcp:error", [{"message": "Node is not a TileMap: " + node_path, "node_type": node.get_class()}])
-		return null
-	return node
-
-func _is_valid_tilemap_layer(tilemap: TileMap, layer: int) -> bool:
-	if layer < 0 or layer >= tilemap.get_layers_count():
-		EngineDebugger.send_message("mcp:error", [{
-			"message": "TileMap layer is out of range",
-			"node_path": str(tilemap.get_path()),
-			"layer": layer,
-			"layer_count": tilemap.get_layers_count()
-		}])
-		return false
-	return true
-
-func _serialize_tilemap_layer(tilemap: TileMap, layer: int) -> Dictionary:
-	return {
-		"node_path": str(tilemap.get_path()),
-		"layer": layer,
-		"name": tilemap.get_layer_name(layer),
-		"enabled": tilemap.is_layer_enabled(layer),
-		"y_sort_enabled": tilemap.is_layer_y_sort_enabled(layer),
-		"y_sort_origin": tilemap.get_layer_y_sort_origin(layer),
-		"z_index": tilemap.get_layer_z_index(layer),
-		"used_cell_count": tilemap.get_used_cells(layer).size()
-	}
-
-func _serialize_tilemap_cell(tilemap: TileMap, layer: int, coords: Vector2i, use_proxies: bool) -> Dictionary:
-	var source_id: int = tilemap.get_cell_source_id(layer, coords, use_proxies)
-	return {
-		"node_path": str(tilemap.get_path()),
-		"layer": layer,
-		"coords": _serialize_value(coords),
-		"use_proxies": use_proxies,
-		"source_id": source_id,
-		"atlas_coords": _serialize_value(tilemap.get_cell_atlas_coords(layer, coords, use_proxies)),
-		"alternative_tile": tilemap.get_cell_alternative_tile(layer, coords, use_proxies),
-		"is_empty": source_id == -1
-	}
+	if node is TileMap:
+		return TileMapAdapter.new(node)
+	if node is TileMapLayer:
+		return TileMapLayerAdapter.new(node)
+	EngineDebugger.send_message("mcp:error", [{"message": "Node is not a TileMap/TileMapLayer: " + node_path, "node_type": node.get_class()}])
+	return null
 
 func _serialize_animation_state(player: AnimationPlayer) -> Dictionary:
 	return {
@@ -1508,3 +1478,100 @@ func _variant_to_vector2i(value: Variant) -> Vector2i:
 	if value is Dictionary:
 		return Vector2i(int(value.get("x", 0)), int(value.get("y", 0)))
 	return Vector2i.ZERO
+
+
+# ===== [gdflow patch] TileMap / TileMapLayer 统一适配器 =====
+class TileMapAdapterBase:
+	extends RefCounted
+	func node_path() -> String: return ""
+	func layer_count() -> int: return 0
+	func validate_layer(_layer: int) -> bool: return false
+	func set_cell(_layer: int, _coords: Vector2i, _sid: int, _atlas: Vector2i, _alt: int): pass
+	func erase_cell(_layer: int, _coords: Vector2i): pass
+	func cell_summary(_layer: int, _coords: Vector2i, _proxies: bool) -> Dictionary: return {}
+	func layer_summary(_layer: int) -> Dictionary: return {}
+
+class TileMapAdapter:
+	extends TileMapAdapterBase
+	var tm: TileMap
+	func _init(t: TileMap) -> void:
+		tm = t
+	func node_path() -> String: return str(tm.get_path())
+	func layer_count() -> int: return tm.get_layers_count()
+	func validate_layer(layer: int) -> bool:
+		if layer < 0 or layer >= tm.get_layers_count():
+			EngineDebugger.send_message("mcp:error", [{
+				"message": "TileMap layer is out of range",
+				"node_path": str(tm.get_path()),
+				"layer": layer,
+				"layer_count": tm.get_layers_count()
+			}])
+			return false
+		return true
+	func set_cell(layer: int, coords: Vector2i, sid: int, atlas: Vector2i, alt: int) -> void:
+		tm.set_cell(layer, coords, sid, atlas, alt)
+	func erase_cell(layer: int, coords: Vector2i) -> void:
+		tm.erase_cell(layer, coords)
+	func cell_summary(layer: int, coords: Vector2i, proxies: bool) -> Dictionary:
+		var source_id: int = tm.get_cell_source_id(layer, coords, proxies)
+		return {
+			"node_path": str(tm.get_path()),
+			"layer": layer,
+			"coords": {"x": coords.x, "y": coords.y},
+			"use_proxies": proxies,
+			"source_id": source_id,
+			"atlas_coords": {"x": tm.get_cell_atlas_coords(layer, coords, proxies).x, "y": tm.get_cell_atlas_coords(layer, coords, proxies).y},
+			"alternative_tile": tm.get_cell_alternative_tile(layer, coords, proxies),
+			"is_empty": source_id == -1
+		}
+	func layer_summary(layer: int) -> Dictionary:
+		return {
+			"name": tm.get_layer_name(layer),
+			"enabled": tm.is_layer_enabled(layer),
+			"y_sort_enabled": tm.is_layer_y_sort_enabled(layer),
+			"y_sort_origin": tm.get_layer_y_sort_origin(layer),
+			"z_index": tm.get_layer_z_index(layer),
+			"used_cell_count": tm.get_used_cells(layer).size()
+		}
+
+class TileMapLayerAdapter:
+	extends TileMapAdapterBase
+	var tl: TileMapLayer
+	func _init(t: TileMapLayer) -> void:
+		tl = t
+	func node_path() -> String: return str(tl.get_path())
+	func layer_count() -> int: return 1
+	func validate_layer(layer: int) -> bool:
+		if layer != 0 and layer != -1:
+			EngineDebugger.send_message("mcp:error", [{
+				"message": "TileMapLayer is single-layer (use layer=0)",
+				"node_path": str(tl.get_path()),
+				"layer": layer
+			}])
+			return false
+		return true
+	func set_cell(_layer: int, coords: Vector2i, sid: int, atlas: Vector2i, alt: int) -> void:
+		tl.set_cell(coords, sid, atlas, alt)
+	func erase_cell(_layer: int, coords: Vector2i) -> void:
+		tl.erase_cell(coords)
+	func cell_summary(layer: int, coords: Vector2i, _proxies: bool) -> Dictionary:
+		var source_id: int = tl.get_cell_source_id(coords)
+		return {
+			"node_path": str(tl.get_path()),
+			"layer": layer,
+			"coords": {"x": coords.x, "y": coords.y},
+			"source_id": source_id,
+			"atlas_coords": {"x": tl.get_cell_atlas_coords(coords).x, "y": tl.get_cell_atlas_coords(coords).y},
+			"alternative_tile": tl.get_cell_alternative_tile(coords),
+			"is_empty": source_id == -1
+		}
+	func layer_summary(_layer: int) -> Dictionary:
+		return {
+			"name": String(tl.name),
+			"enabled": tl.enabled,
+			"y_sort_enabled": tl.y_sort_enabled,
+			"y_sort_origin": tl.y_sort_origin,
+			"z_index": tl.z_index,
+			"used_cell_count": tl.get_used_cells().size()
+		}
+

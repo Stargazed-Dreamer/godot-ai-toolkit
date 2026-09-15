@@ -37,6 +37,8 @@ python gdflow.py --project <项目根> stop     # 停止+清僵尸进程
 | 插件 | PackedVector2Array/ColorArray/Float32/Int32/StringArray 支持 | 解锁 Polygon2D 等资产深水区 |
 | gdmcp | --json 模式下参数错误输出统一 JSON | Agent 可解析，不再被 clap 纯文本噎住 |
 | manager | game/stop 自动清理孤儿游戏进程 | stop 只断会话留僵尸，dump 拿到冻结数据 |
+| 插件 | runtime tilemap 工具兼容 TileMapLayer（4.3+ 推荐节点，适配器模式） | 上游只认老 TileMap |
+| gdflow | `selftest` 一键回归（8 项）/ `guard` 回写覆盖检测+恢复 / `smoke` 冒烟（fps 断言/headless） | 改→测→发布闭环 |
 | gdflow | init 一键接入 / doctor 自检 / setprop 智能重试 / import 安全导入 / 自动识别端口 | 把所有踩坑绕行固化成一条命令 |
 
 详细踩坑结论：**[docs/pitfalls.md](docs/pitfalls.md)**（属性区/资产区/权限区/进程区），

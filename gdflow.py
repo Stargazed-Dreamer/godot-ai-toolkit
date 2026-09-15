@@ -27,6 +27,7 @@
   LocalAgent   --agent（默认 http://127.0.0.1:8766，仅 shot 用，不在线不影响其他命令）
 """
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -333,7 +334,7 @@ class Gd:
         except Exception:
             return a == b
 
-    def setprop(self, node, prop, value_str, runtime=False):
+    def setprop(self, node, prop, value_str, runtime=False, quiet=False):
         try:
             value = json.loads(value_str)
         except Exception:
@@ -353,12 +354,17 @@ class Gd:
             d = self.json(args)
             got = self._get_prop(runtime, node, prop)
             if d.get("ok") and self._equal(got, cand if not isinstance(cand, dict) else cand):
-                print(f"setprop OK（第 {i+1} 种格式）| 读回: {prop} = {json.dumps(got, ensure_ascii=False)[:80]}")
+                if not quiet:
+                    print(f"setprop OK（第 {i+1} 种格式）| 读回: {prop} = {json.dumps(got, ensure_ascii=False)[:80]}")
                 return True
             last = (d, got)
-        print(f"setprop FAIL: 该属性可能不支持 MCP 设值（如 PackedVector2Array），改在脚本 _ready() 里构建")
-        print("  最后尝试:", json.dumps(last[0], ensure_ascii=False)[:200], "| 读回:", last[1])
+        if not quiet:
+            print(f"setprop FAIL: 该属性可能不支持 MCP 设值（如 PackedVector2Array），改在脚本 _ready() 里构建")
+            print("  最后尝试:", json.dumps(last[0], ensure_ascii=False)[:200], "| 读回:", last[1])
         return False
+
+    def setprop_quiet(self, node, prop, value_str, runtime=False):
+        return self.setprop(node, prop, value_str, runtime=runtime, quiet=True)
 
     # ---------- dump / shot ----------
     def dump(self, singleton="DebugRing", retries=3):
@@ -397,6 +403,8 @@ class Gd:
         raise SystemExit("项目未在管理器注册")
 
     def projstop(self):
+        pg = os.path.join(self.project, "project.godot")
+        hash_before = hashlib.sha256(open(pg, "rb").read()).hexdigest() if os.path.exists(pg) else ""
         pid_id = self._project_id()
         st = _http_get(f"{MANAGER}/api/state")
         for p in st["projects"]:
@@ -407,7 +415,52 @@ class Gd:
                         req = urllib.request.Request(f"{MANAGER}/api/instances/{i['id']}", method="DELETE")
                         with urllib.request.urlopen(req, timeout=30):
                             pass
+        # 回写覆盖检测：实例退出时可能把内存配置写回磁盘，吃掉运行期间的手改
+        if os.path.exists(pg):
+            hash_after = hashlib.sha256(open(pg, "rb").read()).hexdigest()
+            if hash_after != hash_before:
+                snap = self._snapshot_path()
+                print("⚠️  检测到回写覆盖！project.godot 在实例退出时被改写（运行期间的手改可能丢失）")
+                if os.path.exists(snap):
+                    print("    上次安全快照: " + snap)
+                    print("    确认后可用恢复: gdflow guard --restore")
+                else:
+                    print("    （无快照可恢复）")
+            else:
+                self._save_snapshot()  # 未发生回写才更新快照（保留旧快照供恢复）
         print("编辑器实例已停（现在可以安全修改 project.godot）")
+
+    def _snapshot_path(self):
+        return os.path.join(self.project, ".gdflow", "project.godot.snap")
+
+    def _save_snapshot(self):
+        pg = os.path.join(self.project, "project.godot")
+        if os.path.exists(pg):
+            os.makedirs(os.path.dirname(self._snapshot_path()), exist_ok=True)
+            shutil.copy2(pg, self._snapshot_path())
+
+    def guard_status(self):
+        pg = os.path.join(self.project, "project.godot")
+        snap = self._snapshot_path()
+        if not os.path.exists(snap):
+            print("无快照（projstop 会自动创建）")
+            return True
+        same = open(pg, "rb").read() == open(snap, "rb").read()
+        print("project.godot 与安全快照", "一致" if same else "不一致（若为意外回写可 guard --restore）")
+        if not same:
+            import difflib
+            cur = open(pg, encoding="utf-8", errors="replace").read().splitlines()
+            old = open(snap, encoding="utf-8", errors="replace").read().splitlines()
+            for line in list(difflib.unified_diff(old, cur, "snapshot", "current", lineterm=""))[:20]:
+                print("  " + line)
+        return same
+
+    def guard_restore(self):
+        snap = self._snapshot_path()
+        if not os.path.exists(snap):
+            raise SystemExit("无快照可恢复")
+        shutil.copy2(snap, os.path.join(self.project, "project.godot"))
+        print("已从安全快照恢复 project.godot")
 
     def projstart(self):
         self.projstop()  # 防重：多实例会抢同一项目的 MCP 端口导致游戏秒退
@@ -416,6 +469,7 @@ class Gd:
         r = _http_post_json(f"{MANAGER}/api/instances", {"projectId": pid_id, "mode": "headless"})
         print("编辑器实例:", r["instance"]["status"])
         time.sleep(6)
+        self._save_snapshot()  # 启动成功 = 新的安全基线
 
 
 # ---------- init：一键铺设工具链 ----------
@@ -583,6 +637,174 @@ def resolve_port(project, port=None):
                      "首次使用请先跑 gdflow init，或显式传 --port")
 
 
+_TEX_TRES = '''[gd_resource type="GradientTexture2D" load_steps=2 format=3]
+
+[sub_resource type="Gradient" id="Gradient_st"]
+offsets = PackedFloat32Array(0, 1)
+colors = PackedColorArray(0.27, 0.51, 0.86, 1, 0.9, 0.3, 0.3, 1)
+
+[resource]
+fill_from = Vector2(0, 0)
+fill_to = Vector2(1, 1)
+gradient = SubResource("Gradient_st")
+width = 32
+height = 32
+'''
+
+_SF_TRES = '''[gd_resource type="SpriteFrames" load_steps=4 format=3]
+
+[ext_resource type="Texture2D" path="res://tests/_st_tex.tres" id="1_tex"]
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_f0"]
+atlas = ExtResource("1_tex")
+region = Rect2(0, 0, 16, 16)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_f1"]
+atlas = ExtResource("1_tex")
+region = Rect2(16, 0, 16, 16)
+
+[resource]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_f0")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_f1")
+}],
+"loop": true,
+"name": &"st_walk",
+"speed": 8.0
+}]
+'''
+
+_TS_TRES = '''[gd_resource type="TileSet" load_steps=3 format=3]
+
+[ext_resource type="Texture2D" path="res://tests/_st_tex.tres" id="1_tex"]
+
+[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_st"]
+texture = ExtResource("1_tex")
+texture_region_size = Vector2i(16, 16)
+0:0/0 = 0
+1:0/0 = 0
+
+[resource]
+tile_size = Vector2i(16, 16)
+sources/0 = SubResource("TileSetAtlasSource_st")
+'''
+
+_CHECK_SCRIPT = '''extends SceneTree
+func _init():
+	var ok := true
+	var sf = load("res://tests/_st_sf.tres")
+	print("ST sf_valid=", sf != null, " anims=", sf.get_animation_names() if sf else [],
+		" frames=", sf.get_frame_count("st_walk") if sf else 0)
+	ok = ok and sf != null and sf.get_frame_count("st_walk") == 2
+	var ts = load("res://tests/_st_ts.tres")
+	var tiles := 0
+	if ts:
+		var src = ts.get_source(ts.get_source_id(0))
+		tiles = src.get_tiles_count() if src else 0
+	print("ST ts_valid=", ts != null, " tiles=", tiles)
+	ok = ok and ts != null and tiles == 2
+	print("ST result=", "PASS" if ok else "FAIL")
+	quit()
+'''
+
+
+def cmd_selftest(project, with_runtime=True):
+    """一键回归：把资产域验证固化成 PASS/FAIL 清单。测试产物在 res://tests/_st_*，跑完清理。"""
+    godot = find_godot()
+    g = Gd(project, resolve_port(project))
+    results = []
+
+    def record(name, ok, detail=""):
+        results.append(ok)
+        print(f"  [{'PASS' if ok else 'FAIL'}] {name}" + (f" — {detail}" if detail and not ok else ""))
+
+    def headless_check():
+        p = os.path.join(project, "tests", "_st_check.gd")
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8", newline="\n") as f:
+            f.write(_CHECK_SCRIPT)
+        r = subprocess.run([godot, "--headless", "--path", project, "--script", "res://tests/_st_check.gd"],
+                           capture_output=True, text=True, timeout=180)
+        out = r.stdout + r.stderr
+        lines = [l for l in out.splitlines() if l.startswith("ST ")]
+        return lines
+
+    print("=== gdflow selftest ===")
+    if not g.ensure_instance():
+        record("实例就绪", False)
+        return False
+
+    tests_dir = os.path.join(project, "tests")
+    os.makedirs(tests_dir, exist_ok=True)
+    for name, body in (("_st_tex.tres", _TEX_TRES), ("_st_sf.tres", _SF_TRES), ("_st_ts.tres", _TS_TRES)):
+        with open(os.path.join(tests_dir, name), "w", encoding="utf-8", newline="\n") as f:
+            f.write(body)
+
+    # T1 场景与节点
+    d = g.call("create_scene", {"scene_path": "res://tests/_st_scene.tscn", "root_node_type": "Node2D"}, apply=True)
+    ok1 = d.get("ok") is True
+    record("T1 create_scene", ok1, json.dumps(d.get("error") or {}, ensure_ascii=False)[:120])
+    if not ok1:
+        return False
+    g.call("open_scene", {"scene_path": "res://tests/_st_scene.tscn", "allow_ui_focus": True}, apply=True)
+    g.call("create_node", {"parent_path": ".", "node_type": "Sprite2D", "node_name": "ST_Sprite"}, apply=True)
+
+    # T2 属性：数组格式自动重试（Vector2）
+    g.setprop_quiet("ST_Sprite", "position", "[3, 4]")
+    got = g._get_prop(False, "ST_Sprite", "position") or {}
+    record("T2 Vector2 数组→对象重试+读回",
+           abs(float(got.get("x", 0)) - 3.0) < 0.01 and abs(float(got.get("y", 0)) - 4.0) < 0.01,
+           f"got={got}")
+
+    # T3 资源字符串直通（GradientTexture2D tres，零导入依赖）
+    d = g.json(["nodes", "properties", "set", "ST_Sprite", "--property", "texture",
+                "--value", "res://tests/_st_tex.tres"])
+    got = g._get_prop(False, "ST_Sprite", "texture") or {}
+    record("T3 texture 字符串直通",
+           bool(d.get("ok")) and got.get("resource_path") == "res://tests/_st_tex.tres",
+           f"resp={json.dumps(d)[:120]} got={json.dumps(got)[:120]}")
+
+    # T4/T5 tres 读写（headless 权威验证）
+    lines = headless_check()
+    sf_line = next((l for l in lines if "sf_valid" in l), "")
+    ts_line = next((l for l in lines if "ts_valid" in l), "")
+    record("T4 SpriteFrames tres 读写", "frames=2" in sf_line and "sf_valid=true" in sf_line, sf_line)
+    record("T5 TileSet tres 读写", "tiles=2" in ts_line and "ts_valid=true" in ts_line, ts_line)
+
+    # T6 场景保存 + 主循环
+    d = g.json(["scenes", "save"])
+    record("T6 场景保存", d.get("ok") is True, json.dumps(d)[:150])
+    record("T7 主循环 check", g.check())
+
+    # T8 运行时链路（run → dump → stop）
+    if with_runtime:
+        try:
+            ok_run = g.run(wait_probe=True, probe_timeout=40.0)
+            time.sleep(1.5)
+            ok_dump = False
+            if ok_run:
+                res = g.dump("DebugRing")
+                ok_dump = isinstance(res, (list, dict))
+            record("T8 run+dump 运行时链路", ok_run and ok_dump,
+                   "" if ok_run and ok_dump else "run 失败或 DebugRing 未安装")
+        finally:
+            g.stop()
+    else:
+        print("  [SKIP] T8 run+dump（--no-run）")
+
+    # 清理测试产物
+    for f in ("_st_scene.tscn", "_st_tex.tres", "_st_sf.tres", "_st_ts.tres", "_st_check.gd", "_st_icon.png"):
+        p = os.path.join(tests_dir, f)
+        if os.path.exists(p):
+            os.remove(p)
+    print("=== selftest 结果:", f"{sum(results)}/{len(results)} PASS", "===")
+    return all(results)
+
+
 def cmd_import(project):
     """资源导入封装：projstop → headless --import → projstart。
     编辑器实例开着时手改 .import / 放新资源，headless 导入会和实例的导入态互相踩，必须走这里。"""
@@ -615,6 +837,55 @@ def cmd_import(project):
     return not bad
 
 
+def cmd_smoke(project, seconds=6.0, min_fps=30.0, headless=False):
+    """冒烟测试：游戏能跑、fps 达标（有头）、stderr 无 ERROR。退出码供 CI。"""
+    godot = find_godot()
+    if headless:
+        # 纯逻辑冒烟：headless 跑主场景 N 秒后杀掉，检查输出无 ERROR
+        pg = os.path.join(project, "project.godot")
+        main = ""
+        for line in open(pg, encoding="utf-8", errors="replace"):
+            if line.startswith("run/main_scene"):
+                main = line.split("=", 1)[1].strip().strip('"')
+                break
+        if not main:
+            raise SystemExit("project.godot 未设置 run/main_scene")
+        r = subprocess.Popen([godot, "--headless", "--path", project, main],
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        time.sleep(seconds)
+        r.kill()
+        out = r.stdout.read() if r.stdout else ""
+        bad = [l for l in out.splitlines() if "ERROR" in l.upper() and "still in use" not in l.lower()]
+        print("smoke(headless):", "PASS" if not bad else "FAIL")
+        for l in bad[:6]:
+            print("  ", l[:160])
+        return not bad
+    # 有头：真 fps 断言（停完立刻跑会有调试桥竞态，失败自动重试一次）
+    g = Gd(project, resolve_port(project))
+    try:
+        ok_run = g.run(wait_probe=True, probe_timeout=40.0)
+        if not ok_run:
+            print("smoke: 首次启动探针未就绪（竞态），stop 后重试一次...")
+            g.stop()
+            time.sleep(2.0)
+            ok_run = g.run(wait_probe=True, probe_timeout=40.0)
+        if not ok_run:
+            print("smoke: FAIL（启动/探针失败）")
+            return False
+        deadline = time.time() + max(2.0, seconds)
+        fps = 0.0
+        while time.time() < deadline:
+            info = g.json(["runtime", "info"]).get("data") or {}
+            if info.get("status") == "success":
+                fps = float(info.get("fps") or 0)
+            time.sleep(1.0)
+        ok = fps >= min_fps
+        print(f"smoke: {'PASS' if ok else 'FAIL'} | fps={fps:.0f}（阈值 {min_fps:.0f}）")
+        return ok
+    finally:
+        g.stop()
+
+
 def main():
     global MANAGER, LOCALAGENT
     ap = argparse.ArgumentParser(description="gdflow — Godot AI 开发辅助层")
@@ -641,6 +912,14 @@ def main():
     sp2 = sub.add_parser("shot"); sp2.add_argument("out", nargs="?")
     sub.add_parser("projstop"); sub.add_parser("projstart")
     sub.add_parser("import", help="安全资源导入（停实例→headless --import→起实例）")
+    st = sub.add_parser("selftest", help="一键回归套件（属性/直通/tres/场景/运行时链路）")
+    st.add_argument("--no-run", action="store_true", help="跳过 run+dump 运行时链路")
+    sm = sub.add_parser("smoke", help="冒烟测试（fps 断言 / headless 逻辑冒烟）")
+    sm.add_argument("--seconds", type=float, default=6.0)
+    sm.add_argument("--min-fps", type=float, default=30.0)
+    sm.add_argument("--headless", action="store_true", help="纯逻辑冒烟（不弹窗，stderr 无 ERROR 即过）")
+    gd = sub.add_parser("guard", help="project.godot 回写覆盖防护")
+    gd.add_argument("--restore", action="store_true", help="从安全快照恢复")
     a = ap.parse_args()
 
     if a.manager:
@@ -671,6 +950,13 @@ def main():
     elif a.cmd == "projstop": g.projstop()
     elif a.cmd == "projstart": g.projstart()
     elif a.cmd == "import": sys.exit(0 if cmd_import(a.project) else 1)
+    elif a.cmd == "selftest": sys.exit(0 if cmd_selftest(a.project, with_runtime=not a.no_run) else 1)
+    elif a.cmd == "smoke": sys.exit(0 if cmd_smoke(a.project, a.seconds, a.min_fps, a.headless) else 1)
+    elif a.cmd == "guard":
+        if a.restore:
+            g.guard_restore()
+        else:
+            sys.exit(0 if g.guard_status() else 1)
 
 
 if __name__ == "__main__":
