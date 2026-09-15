@@ -54,6 +54,8 @@ AI 组装配方：**[docs/recipes.md](docs/recipes.md)**（手写 tres、直通�
 
 带教理念：AI 能干的（格式文件、批量铺量、报错诊断）交给 AI；**判断型劳动**（切帧边界、动画节奏、关卡设计、音效挑选）必须新人自己做——那才是 AI 时代要练的本事。
 
+多人组队打 jam / 和新人协作时的开工与收尾清单（leader 定标准、术语表、集中常量、commit 纪律、封包缓冲）：**[docs/gamejam-lessons.md](docs/gamejam-lessons.md)**。
+
 ## 已知边界
 
 - 插件 runtime tilemap 工具只支持老 `TileMap` 节点，不支持 4.3+ 的 `TileMapLayer`（用代码 `set_cell()`）
