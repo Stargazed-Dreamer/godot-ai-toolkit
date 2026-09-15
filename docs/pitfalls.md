@@ -67,3 +67,14 @@ AI Agent
 2. **进程级故障才看屏幕**（卡 splash/窗口没出）：两层观察分工
 3. `get_editor_logs` 三个 source：`mcp`=工具日志、`editor_panel`=编辑器输出（游戏 print **不进**这里）、`runtime`=godot.log（无头默认空）
 4. 截图同会话只第一张新鲜——用 `gdflow shot` 走外部截图
+
+## 7. 实战新坑（platformer-test 整游戏验证，2026-09-16）
+
+| 坑 | 现象 | 对策 |
+|---|---|---|
+| **物理回调里切场景** ⭐ | `body_entered`/`_physics_process` 中直接 `change_scene_to_file`/`reload_current_scene` → **整个游戏进程挂死**（帧数冻结、无报错） | 一律 `.call_deferred()`（实测挂死复现 2 次后修复） |
+| runtime set 位置格式 | `"(x,y)"` 文本格式静默失败（放节点到 0,0）；返回 ok 但没生效 | 用 JSON 对象 `{"x":..,"y":..}`，**改后必读回** |
+| `--headless --script` 模式 | 引用 autoload 名（GameState/Sfx）的脚本**编译失败**（该模式不初始化 autoload） | 诊断脚本别碰 autoload；权威验证用 `gdflow check`（标准主循环） |
+| Git Bash 路径转换 | `/root/Node` 参数被 MSYS 转成本地盘路径 → "Node not found: E:/.../root/..." | 前缀 `export MSYS2_ARG_CONV_EXCL="*"` |
+| 受伤无无敌帧 | 重叠期 body_entered 重复触发连扣多命 | 受伤冷却计时器（0.9s） |
+| API 假设 | DebugRing 的方法是 `dbg()` 不是 `log()`——用工具前先 grep 实际 API | `grep -n "^func" xxx.gd` |
