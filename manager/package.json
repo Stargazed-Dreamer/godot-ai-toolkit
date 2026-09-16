@@ -1,0 +1,29 @@
+{
+  "name": "godot-multi-manager",
+  "version": "0.1.0",
+  "description": "Godot multi-project / multi-instance manager built on the Godot-MCP-Native plugin and the gdmcp CLI — create, configure and start/stop Godot editor & headless instances in one click, with a dedicated MCP port per project.",
+  "type": "module",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "smoke": "node scripts/ui-smoke.mjs"
+  },
+  "keywords": [
+    "godot",
+    "mcp",
+    "model-context-protocol",
+    "godot-mcp-native",
+    "gdmcp",
+    "multi-instance",
+    "headless",
+    "ai-tools"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MBZY/godot-multi-manager.git"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

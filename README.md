@@ -65,7 +65,7 @@ AI 组装配方：**[docs/recipes.md](docs/recipes.md)**（手写 tres、直通�
 ## 致谢
 
 - [Godot-MCP-Native](https://github.com/yurineko73/Godot-MCP-Native)（MIT）— 编辑器内 MCP 服务器插件，本仓库 `gdflow_assets/addons/` 为其补丁 fork
-- [godot-multi-manager](https://github.com/MBZY/godot-multi-manager)（MIT）— 多实例管理器，本仓库 `patches/` 含改进补丁
+- [godot-multi-manager](https://github.com/MBZY/godot-multi-manager)（MIT）— 多实例管理器，本仓库 `manager/` 为含改进补丁的完整再分发（离线缓存随包）
 - gdmcp CLI 源自 Godot-MCP-Native 仓库 `cli/gdmcp`，本仓库二进制为改进版本地编译
 
 改动均为 MIT 协议下的再分发，上游署名见 [NOTICE.md](NOTICE.md)。

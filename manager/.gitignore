@@ -1,0 +1,18 @@
+# === 依赖与运行时数据 ===
+node_modules/
+data/
+*.log
+.DS_Store
+
+# === AI / IDE 会话产物（含本机绝对路径与内部开发计划，严禁入库）===
+.zcode/
+.workbuddy/
+.idea/
+.vscode/
+
+# === 演示与录制产物（体积大 / 含演示环境数据，走 GitHub Releases 分发）===
+output/
+scripts/_build-video.sh
+scripts/_record-inject.mjs
+scripts/_record-server.mjs
+scripts/_record.sh

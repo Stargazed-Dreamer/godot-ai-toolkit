@@ -12,12 +12,13 @@
   - `cli/gdmcp`（编译产物 gdflow_assets/gdmcp/gdmcp.exe）：--json 模式参数错误统一 JSON 输出
 - 原许可证全文见 gdflow_assets/addons/godot_mcp/LICENSE
 
-## 2. godot-multi-manager（不含于本仓库，改进以补丁形式提供）
+## 2. godot-multi-manager（本仓库 manager/ 目录为其完整再分发，含下述改进）
 
 - 原仓库：https://github.com/MBZY/godot-multi-manager
 - 原协议：MIT License © MBZY
-- 本仓库 patches/manager-orphan-process-cleanup.patch：
-  停止游戏时自动清理孤儿游戏窗口进程（lib/gdmcp.mjs + server.mjs）
+- 本仓库 manager/ 为完整副本，改动：停止游戏时自动清理孤儿游戏窗口进程
+  （lib/gdmcp.mjs + server.mjs）；data/cache/ 内置工具链缓存用于离线部署
+- 历史补丁文件仍保留于 patches/manager-orphan-process-cleanup.patch
 
 ## 3. Godot Engine
 

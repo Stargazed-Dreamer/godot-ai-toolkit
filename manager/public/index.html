@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Godot 多开管理器</title>
+  <link rel="icon" href="favicon.svg">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 128 128" width="22" height="22" aria-hidden="true">
+        <rect width="128" height="128" rx="28" fill="#202531"/>
+        <circle cx="64" cy="64" r="28" fill="none" stroke="#4f8cff" stroke-width="11"/>
+        <circle cx="64" cy="27" r="9" fill="#4f8cff"/>
+        <circle cx="96" cy="81" r="9" fill="#4f8cff"/>
+        <circle cx="32" cy="81" r="9" fill="#4f8cff"/>
+      </svg>
+      <span>Godot 多开管理器</span>
+    </div>
+    <div id="toolchainBadge" class="badge" title="Godot-MCP-Native 插件 + gdmcp CLI 缓存状态">工具链</div>
+    <div class="spacer"></div>
+    <button id="btnSettings" class="btn ghost">⚙ 设置</button>
+  </header>
+  <div id="layout">
+    <aside id="sidebar">
+      <div class="sidebar-actions">
+        <button id="btnNewProject" class="btn primary block">＋ 新建项目</button>
+        <button id="btnAddProject" class="btn block">添加已有项目</button>
+      </div>
+      <div id="projectList" class="project-list"></div>
+    </aside>
+    <main id="main"></main>
+  </div>
+  <div id="toasts"></div>
+  <div id="modalRoot"></div>
+  <script src="app.js"></script>
+</body>
+</html>
